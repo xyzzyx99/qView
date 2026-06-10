@@ -17,16 +17,28 @@ on:
 jobs:
   build:
     runs-on: windows-2022
+
     env:
-      # Force MSVC to build optimized x64 code with AVX2.
-      CL: "/O2 /arch:AVX2"
+      # MSVC compile flags:
+      # /O2        = optimize for speed
+      # /arch:AVX2 = enable AVX2 code generation
+      # /GL        = whole-program/global optimization
+      CL: "/O2 /arch:AVX2 /GL"
+      _CL_: "/O2 /arch:AVX2 /GL"
+
+      # MSVC linker flags:
+      # /LTCG = link-time code generation, used with /GL
+      LINK: "/LTCG"
+      _LINK_: "/LTCG"
+
     steps:
       - name: Set environment variables
         shell: bash
         run: |
           echo "qtArch=win64_msvc2022_64" >> $GITHUB_ENV
           echo "osSuffix=_64" >> $GITHUB_ENV
-          if [ "${{ inputs.isRelease }}" != "true" ]; then
+          echo "buildArch=" >> $GITHUB_ENV
+          if [ "${{ inputs.isRelease }}" ?= "true" ]; then
             buildNum=$(date '+%Y-%m-%d').$GITHUB_RUN_ATTEMPT
             echo "nightlyDefines=NIGHTLY=$buildNum" >> $GITHUB_ENV
             echo "nightlyString=-nightly" >> $GITHUB_ENV
@@ -42,6 +54,23 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
           modules: qtimageformats
+
+      - name: Force MSVC AVX2, O2, and global optimization in qmake
+        shell: pwsh
+        run: |
+          $flags = @"
+
+          # Added by GitHub Actions workflow: x64 AVX2 optimized release build
+          QMAKE_CFLAGS_RELEASE += /O2 /arch:AVX2 /GL
+          QMAKE_CXXFLAGS_RELEASE += /O2 /arch:AVX2 /GL
+          QMAKE_LFLAGS_RELEASE += /LTCG
+          QMAKE_LFLAGS += /LTCG
+          "@
+
+          Get-ChildItem -Path . -Recurse -Include *.pro,*.pri | ForEach-Object {
+            Add-Content -Path $_.FullName -Value $flags
+            Write-Host "Added AVX2/O2/GL/LTCG flags to $($_.FullName)"
+          }
 
       - name: Build qView
         shell: pwsh
