@@ -1,0 +1,66 @@
+name: Build qView AVX2
+
+on:
+  workflow_dispatch:
+    inputs:
+      isRelease:
+        type: boolean
+        description: 'Is this a release build?'
+        required: false
+        default: false
+      appleNotarize:
+        type: boolean
+        description: 'Notarize with Apple?'
+        required: false
+        default: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    env:
+      # Force MSVC to build optimized x64 code with AVX2.
+      CL: "/O2 /arch:AVX2"
+    steps:
+      - name: Set environment variables
+        shell: bash
+        run: |
+          echo "qtArch=win64_msvc2022_64" >> $GITHUB_ENV
+          echo "osSuffix=_64" >> $GITHUB_ENV
+          if [ "${{ inputs.isRelease }}" != "true" ]; then
+            buildNum=$(date '+%Y-%m-%d').$GITHUB_RUN_ATTEMPT
+            echo "nightlyDefines=NIGHTLY=$buildNum" >> $GITHUB_ENV
+            echo "nightlyString=-nightly" >> $GITHUB_ENV
+            echo "buildNumString=$buildNum" >> $GITHUB_ENV
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+          modules: qtimageformats
+
+      - name: Build qView
+        shell: pwsh
+        run: dist/scripts/build.ps1
+
+      - name: Deploy qView
+        env:
+          APPLE_NOTARIZE_REQUESTED: ${{ inputs.appleNotarize }}
+          APPLE_DEVID_APP_CERT_DATA: ${{ secrets.APPLE_DEVID_APP_CERT_DATA }}
+          APPLE_DEVID_APP_CERT_PASS: ${{ secrets.APPLE_DEVID_APP_CERT_PASS }}
+          APPLE_ID_USER: ${{ secrets.APPLE_ID_USER }}
+          APPLE_ID_PASS: ${{ secrets.APPLE_ID_PASS }}
+        shell: pwsh
+        run: |
+          Invoke-Expression "& 'dist/scripts/download-plugins.ps1'"
+          Invoke-Expression "& 'dist/scripts/windeployqt.ps1' ${{ env.buildNumString }}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qView${{ env.nightlyString }}-Windows${{ env.osSuffix }}-${{ env.buildNumString }}
+          path: bin
