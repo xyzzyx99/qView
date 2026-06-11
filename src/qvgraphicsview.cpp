@@ -167,71 +167,61 @@ bool QVGraphicsView::event(QEvent *event)
 
 void QVGraphicsView::wheelEvent(QWheelEvent *event)
 {
-
 #if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
     const QPoint eventPos = event->position().toPoint();
 #else
     const QPoint eventPos = event->pos();
 #endif
 
-    const bool modifierPressed = event->modifiers().testFlag(Qt::ControlModifier);
-    bool dontZoom = scrollZooms == 2;
-    if (modifierPressed)
+    const int yDelta = event->angleDelta().y();
+    if (yDelta == 0)
     {
-        dontZoom = !dontZoom;
+        event->ignore();
+        return;
     }
 
-bool touchDeviceDetected = false;
+    const bool ctrlPressed = event->modifiers().testFlag(Qt::ControlModifier);
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    // Auto-detect touchpad
-    touchDeviceDetected = event->device()->type() == QInputDevice::DeviceType::TouchPad || event->device()->type() == QInputDevice::DeviceType::TouchScreen;
-    // Real touchpads are likely to exhibit these characteristics in empirical testing
-    touchDeviceDetected = touchDeviceDetected && event->phase() != Qt::NoScrollPhase;
-    if (touchDeviceDetected && scrollZooms == 1)
-    {
-        // If this is a touch device, override setting
-        dontZoom = !modifierPressed;
-    }
+    const bool touchDeviceDetected =
+        (event->device()->type() == QInputDevice::DeviceType::TouchPad ||
+         event->device()->type() == QInputDevice::DeviceType::TouchScreen) &&
+        event->phase() != Qt::NoScrollPhase;
+#else
+    const bool touchDeviceDetected = false;
 #endif
 
-    if (dontZoom)
+    // Ctrl + mouse wheel = zoom in/out.
+    if (ctrlPressed)
     {
-        const qreal scrollDivisor = 2.0; // To make scrolling less sensitive
-        qreal scrollX = event->angleDelta().x() * (isRightToLeft() ? 1 : -1) / scrollDivisor;
-        qreal scrollY = event->angleDelta().y() * -1 / scrollDivisor;
+        const qreal yScale = 120.0;
+        const qreal zoomAmountPerWheelClick = scaleFactor - 1.0;
+        qreal zoomFactor = zoomAmountPerWheelClick;
 
-        if (event->modifiers() & Qt::ShiftModifier)
-            std::swap(scrollX, scrollY);
+        if (isFractionalZoomEnabled || touchDeviceDetected)
+        {
+            const qreal fractionalWheelClicks = qFabs(yDelta) / yScale;
+            zoomFactor *= fractionalWheelClicks;
+        }
 
-        QPointF targetScrollDelta = QPointF(scrollX, scrollY) - lastScrollRoundingError;
-        QPoint roundedScrollDelta = targetScrollDelta.toPoint();
+        zoomFactor += 1.0;
 
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() + roundedScrollDelta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() + roundedScrollDelta.y());
+        if (yDelta < 0)
+            zoomFactor = qPow(zoomFactor, -1);
 
-        lastScrollRoundingError = roundedScrollDelta - targetScrollDelta;
-
+        zoom(zoomFactor, eventPos);
+        event->accept();
         return;
     }
 
-    const int yDelta = event->angleDelta().y();
-    const qreal yScale = 120.0;
+    // Plain mouse wheel = previous/next image.
+    // Wheel up = previous image; wheel down = next image.
+    if (yDelta > 0)
+        goToFile(GoToFileMode::previous);
+    else
+        goToFile(GoToFileMode::next);
 
-    if (yDelta == 0)
-        return;
-
-    const qreal zoomAmountPerWheelClick = scaleFactor - 1.0;
-    qreal zoomFactor = zoomAmountPerWheelClick;
-    if (isFractionalZoomEnabled || touchDeviceDetected) {
-        const qreal fractionalWheelClicks = qFabs(yDelta) / yScale;
-        zoomFactor *= fractionalWheelClicks;
-    }
-    zoomFactor += 1.0;
-
-    if (yDelta < 0)
-        zoomFactor = qPow(zoomFactor, -1);
-
-    zoom(zoomFactor, eventPos);
+    event->accept();
 }
 
 // Functions
